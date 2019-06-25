@@ -7,14 +7,13 @@ use nix;
 use nix::unistd::{Uid, Gid, setuid, setgid, getgroups, setgroups};
 
 pub mod config;
-mod error;
 #[cfg(target_os="linux")]
 pub mod seccomp;
 
-pub use self::error::Error;
+pub use crate::errors::*;
 
 
-pub fn activate_stage1() -> Result<(), Error> {
+pub fn activate_stage1() -> Result<()> {
     #[cfg(target_os="linux")]
     seccomp::activate_stage1()?;
 
@@ -23,25 +22,20 @@ pub fn activate_stage1() -> Result<(), Error> {
     Ok(())
 }
 
-pub fn chroot(path: &str) -> Result<(), Error> {
-    let metadata = match fs::metadata(path) {
-        Ok(meta) => meta,
-        Err(_) => return Err(Error::Chroot),
-    };
+pub fn chroot(path: &str) -> Result<()> {
+    let metadata = fs::metadata(path)
+        .context("Failed to stat chroot folder")?;
 
     if !metadata.is_dir() {
-        error!("chroot target is no directory");
-        return Err(Error::Chroot);
+        bail!("Chroot folder target is no directory");
     }
 
     if metadata.uid() != 0 {
-        error!("chroot target isn't owned by root");
-        return Err(Error::Chroot);
+        bail!("Chroot folder target isn't owned by root");
     }
 
     if metadata.mode() & 0o22 != 0 {
-        error!("chroot is writable by group or world");
-        return Err(Error::Chroot);
+        bail!("Chroot folder is writable by group or world");
     }
 
     nix::unistd::chroot(path)?;
@@ -66,15 +60,13 @@ pub fn id() -> String {
     )
 }
 
-fn apply_config(config: config::Config) -> Result<(), Error> {
+fn apply_config(config: config::Config) -> Result<()> {
     debug!("got config: {:?}", config);
 
     let user = match config.sandbox.user {
         Some(user) => {
-            let user = match users::get_user_by_name(&user) {
-                Some(user) => user,
-                None => return Err(Error::InvalidUser),
-            };
+            let user = users::get_user_by_name(&user)
+                .ok_or_else(|| format_err!("Sandbox user doesn't exist"))?;
             Some((user.uid(), user.primary_group_id()))
         },
         _ => None,
@@ -112,7 +104,7 @@ fn apply_config(config: config::Config) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn activate_stage2() -> Result<(), Error> {
+pub fn activate_stage2() -> Result<()> {
     let config = config::find().map_or_else(
         || {
             warn!("couldn't find config");

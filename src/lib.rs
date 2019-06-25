@@ -13,10 +13,12 @@ extern crate users;
 extern crate dirs;
 extern crate nix;
 extern crate base64;
+#[macro_use] extern crate failure;
 #[cfg(target_os="linux")]
 extern crate syscallz;
 
 pub mod centrifuge;
+pub mod errors;
 pub mod link;
 mod nom_http;
 pub mod sandbox;

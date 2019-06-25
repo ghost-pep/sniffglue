@@ -21,6 +21,7 @@ threadpool = "1.7"
 num_cpus = "1.6"
 pcap = "0.7.0"
 pktparse = { version = "0.4", features = ["derive"] }
+failure = "0.1"
 nom = "4.0"
 dns-parser = "0.8"
 tls-parser = "0.7"

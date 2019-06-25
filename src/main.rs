@@ -23,6 +23,7 @@ use std::sync::mpsc;
 mod cli;
 mod fmt;
 use cli::Args;
+use sniffglue::errors::*;
 use sniffglue::centrifuge;
 use sniffglue::link::DataLink;
 use sniffglue::sandbox;
@@ -64,11 +65,12 @@ impl From<Capture<pcap::Offline>> for CapWrap {
 }
 
 
-fn main() {
+fn run() -> Result<()> {
     // this goes before the sandbox so logging is available
     env_logger::init();
 
-    sandbox::activate_stage1().expect("init sandbox stage1");
+    sandbox::activate_stage1()
+        .context("Failed to init sandbox stage1")?;
 
     let args = Args::from_args();
 
@@ -91,37 +93,26 @@ fn main() {
     let config = fmt::Config::new(layout, args.verbose, colors);
 
     let cap: CapWrap = if !args.read {
-        match Capture::from_device(device.as_str()).unwrap()
+        let cap = Capture::from_device(device.as_str()).unwrap()
                 .promisc(args.promisc)
-                .open() {
-            Ok(cap) => {
-                let verbosity = config.filter().verbosity;
-                eprintln!("Listening on device: {:?}, verbosity {}/4", device, verbosity);
-                cap.into()
-            },
-            Err(e) => {
-                eprintln!("Failed to open interface {:?}: {}", device, e);
-                return;
-            },
-        }
+                .open()
+                .context(format!("Failed to open interface: {:?}", device))?;
+        let verbosity = config.filter().verbosity;
+        eprintln!("Listening on device: {:?}, verbosity {}/4", device, verbosity);
+        cap.into()
     } else {
-        match Capture::from_file(device.as_str()) {
-            Ok(cap) => {
-                eprintln!("Reading from file: {:?}", device);
-                cap.into()
-            },
-            Err(e) => {
-                eprintln!("Failed to open pcap file {:?}: {}", device, e);
-                return;
-            },
-        }
+        let cap = Capture::from_file(device.as_str())
+            .context(format!("Failed to open pcap file: {:?}", device))?;
+        eprintln!("Reading from file: {:?}", device);
+        cap.into()
     };
 
 
     let (tx, rx): (Sender, Receiver) = mpsc::channel();
     let filter = config.filter();
 
-    sandbox::activate_stage2().expect("init sandbox stage2");
+    sandbox::activate_stage2()
+        .context("Failed to init sandbox stage2")?;
 
     let join = thread::spawn(move || {
         let pool = ThreadPool::new(cpus);
@@ -164,4 +155,16 @@ fn main() {
     }
 
     join.join().unwrap();
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("Error: {}", err);
+        for cause in err.iter_chain().skip(1) {
+            eprintln!("Because: {}", cause);
+        }
+        std::process::exit(1);
+    }
 }
